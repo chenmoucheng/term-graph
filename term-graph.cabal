@@ -1,0 +1,29 @@
+name:                term-graph
+version:             0.2.0.0
+-- synopsis:
+-- description:
+homepage:            https://github.com/chenmoucheng/chenmoucheng.github.io/tree/master/43041/code/term-graph#readme
+license:             BSD3
+license-file:        LICENSE
+author:              Chen-Mou Cheng
+maintainer:          chenmou.cheng@gmail.com
+copyright:           2020 Chen-Mou Cheng
+category:            Haskell2010
+build-type:          Simple
+cabal-version:       >=1.10
+extra-source-files:  README.md
+
+executable term-graph
+  hs-source-dirs:      src
+  main-is:             Main.hs
+  default-language:    Haskell2010
+  build-depends:       array,
+                       base >= 4.7 && < 5,
+                       fastcgi,
+                       containers,
+                       mod,
+                       mtl,
+                       permutation,
+                       QuickCheck,
+                       quickcheck-arbitrary-adt,
+                       xhtml
