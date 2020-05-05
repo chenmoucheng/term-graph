@@ -1,3 +1,3 @@
 # term-graph
 
-Generate random term graphs
+A CGI program that generates random term graphs
