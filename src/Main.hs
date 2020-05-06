@@ -115,6 +115,15 @@ module Main where
     p = elem v (map root $ dff g) where
       (g,v) = unTermDag $ toTermDag t
       root (Node r _) = r
+  
+  show' :: TermDag -> String
+  show' tdag = foldr1 (++) [
+      show min, "\n",
+      show max, "\n",
+      foldr (++) "" [ show (length vs) ++ f vs ++ "\n" | vs <- elems g ]
+    ] where (g,_) = unTermDag tdag
+            (min,max) = bounds g
+            f = foldr (++) "" . map ((++) " " . show)
 
   instance Show TermDag where
     show tdag = v' ++ es where
@@ -249,8 +258,9 @@ module Main where
     output $ renderHtml $
       header << thetitle << "Generate a random term graph" +++
       body << concatHtml [
-        h1 << "Term:",  (textarea << show (term phi)) HTML.! [intAttr "rows"  4, intAttr "cols" 80, strAttr "name" "t", strAttr "form" "term-form"],
-        h1 << "Graph:", (textarea << show       phi)  HTML.! [intAttr "rows" 40, intAttr "cols" 80],
+        h1 << "Term:",  (textarea << show      (term phi)) HTML.! [intAttr "rows"  4, intAttr "cols" 80, strAttr "name" "t", strAttr "form" "term-form"],
+        h1 << "Graph:", (textarea << show            phi)  HTML.! [intAttr "rows" 40, intAttr "cols" 80],
+                        (textarea << show' (termDag' phi)) HTML.! [intAttr "rows" 40, intAttr "cols" 80],
         p << (form << [submit "" "Generate an isomorphic graph", hidden "v" (show v), hidden "e" (show e)]) HTML.! [strAttr "id" "term-form"], hr,
         form << [
             p << ((HTML.label << "Number of vertices: ") HTML.! [strAttr "for" "v"] +++ widget "number" "v" [intAttr "min" 1, intAttr "max" 99, intAttr "value" v]),
