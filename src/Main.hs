@@ -14,7 +14,7 @@ module Main where
   -- Copied from http://hackage.haskell.org/package/quickcheck-arbitrary-adt-0.3.1.0/docs/Test-QuickCheck-Arbitrary-ADT.html
   import Data.Proxy                    (Proxy(..))
   import GHC.Generics                  (Generic)
-  import Test.QuickCheck as QC         (Arbitrary(..),forAllProperties,Gen,generate,label,maxSuccess,quickCheckWithResult,shuffle,stdArgs)
+  import Test.QuickCheck as QC         (Arbitrary(..),forAllProperties,Gen,generate,label,maxSuccess,quickCheckWithResult,shuffle,stdArgs,suchThat)
   import Test.QuickCheck.Arbitrary.ADT (genericArbitrary,ToADTArbitrary)
 
   import Control.Monad                 (liftM)
@@ -115,6 +115,10 @@ module Main where
     p = elem v (map root $ dff g) where
       (g,v) = unTermDag $ toTermDag t
       root (Node r _) = r
+
+  sizeTermDag :: TermDag -> (Int,Int)
+  sizeTermDag tdag = (length $ vertices g, length $ edges g) where
+    (g,_) = unTermDag tdag
   
   show' :: TermDag -> String
   show' tdag = foldr1 (++) [
@@ -150,7 +154,7 @@ module Main where
     l = "size = " ++ show (sizeIsoTermDag phi)
     p = (toTerm $ termDag phi) == (toTerm $ termDag' phi)
 
-  sizeIsoTermDag = (+) 1 . snd . bounds . fst . unTermDag . termDag
+  sizeIsoTermDag = sizeTermDag . termDag
 
   arbitraryIso :: Term -> Gen IsoTermDag
   arbitraryIso t = do
@@ -160,15 +164,10 @@ module Main where
     let p = listPermute (m + 1) ([0 .. nvars - 1] ++ l)
     return $ IsoTermDag { term = t, termDag = tdag, iso = p }
 
-  generateIsoOfSize :: (Int,Int) -> Int -> IO IsoTermDag
-  generateIsoOfSize (nV,nE) cnt = do
-    phi <- generate (arbitrary :: Gen IsoTermDag)
-    let (g,v) = unTermDag $ termDag phi
-    let dV = abs $ nV - length (vertices g)
-    let dE = abs $ nE - length (edges g)
-    if (cnt < 1) || (dV < 2 && dE < 4)
-      then return phi
-      else generateIsoOfSize (nV,nE) (cnt - 1)
+  generateIsoOfSize :: (Int,Int) -> IO IsoTermDag
+  generateIsoOfSize (minV,minE) = generate $ suchThat arbitrary $ \phi -> let
+    (v,e) = sizeIsoTermDag phi
+    in v >= minV && e >= minE
 
   instance Show IsoTermDag where
     show phi = "; " ++ (show $ term phi) ++ "\n" ++ (show $ termDag' phi)
@@ -254,7 +253,7 @@ module Main where
     t <- liftM                 (>>=readMaybe)  $ getInput "t"
     phi <- liftIO $ case t of
       Just t' -> generate $ arbitraryIso t'
-      Nothing -> generateIsoOfSize (v,e) 100000
+      Nothing -> generateIsoOfSize (v,e)
     output $ renderHtml $
       header << thetitle << "Generate a random term graph" +++
       body << concatHtml [
@@ -263,8 +262,8 @@ module Main where
                         (textarea << show' (termDag' phi)) HTML.! [intAttr "rows" 40, intAttr "cols" 80],
         p << (form << [submit "" "Generate an isomorphic graph", hidden "v" (show v), hidden "e" (show e)]) HTML.! [strAttr "id" "term-form"], hr,
         form << [
-            p << ((HTML.label << "Number of vertices: ") HTML.! [strAttr "for" "v"] +++ widget "number" "v" [intAttr "min" 1, intAttr "max" 99, intAttr "value" v]),
-            p << ((HTML.label << "Number of edges: ")    HTML.! [strAttr "for" "e"] +++ widget "number" "e" [intAttr "min" 1, intAttr "max" 99, intAttr "value" e]),
+            p << ((HTML.label << "Minimum number of vertices: ") HTML.! [strAttr "for" "v"] +++ widget "number" "v" [intAttr "min" 1, intAttr "max" 99, intAttr "value" v]),
+            p << ((HTML.label << "Minimum number of edges: ")    HTML.! [strAttr "for" "e"] +++ widget "number" "e" [intAttr "min" 1, intAttr "max" 99, intAttr "value" e]),
             p << submit "" "Generate a new term graph"
           ]
       ]
