@@ -20,6 +20,7 @@ RUN apt-get autoremove -y \
     && apt-get clean -y \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
+COPY favicon.ico ./
 COPY nginx.conf ./
 ENV HOST 0.0.0.0
 ENV PORT 8080

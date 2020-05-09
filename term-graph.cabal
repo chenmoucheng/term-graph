@@ -1,5 +1,5 @@
 name:                term-graph
-version:             0.2.0.0
+version:             0.2.1.0
 -- synopsis:
 -- description:
 homepage:            https://github.com/chenmoucheng/chenmoucheng.github.io/tree/master/43041/code/term-graph#readme
@@ -27,3 +27,4 @@ executable term-graph
                        QuickCheck,
                        quickcheck-arbitrary-adt,
                        xhtml
+  other-modules:       TermGraph
