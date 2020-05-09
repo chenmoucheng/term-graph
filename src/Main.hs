@@ -31,15 +31,17 @@ module Main where
       Just t' -> generate $ arbitraryIso t'
       Nothing -> generateIsoOfSize (v,e)
     output $ renderHtml $
-      header << thetitle << "Generate a random term graph" +++
+      header << thetitle << "Generate random term graphs" +++
       body << concatHtml [
-        h1 << "Term:",  (textarea << show      (term phi)) HTML.! [intAttr "rows"  4, intAttr "cols" 80, strAttr "name" "t", strAttr "form" "term-form"],
-        h1 << "Graph:", (textarea << show            phi)  HTML.! [intAttr "rows" 40, intAttr "cols" 80],
-                        (textarea << show' (termDag' phi)) HTML.! [intAttr "rows" 40, intAttr "cols" 80],
-        p << (form << [submit "" "Generate an isomorphic graph", hidden "v" (show v), hidden "e" (show e)]) HTML.! [strAttr "id" "term-form"], hr,
         form << [
             p << ((HTML.label << "Minimum number of vertices: ") HTML.! [strAttr "for" "v"] +++ widget "number" "v" [intAttr "min" 1, intAttr "max" 99, intAttr "value" v]),
             p << ((HTML.label << "Minimum number of edges: ")    HTML.! [strAttr "for" "e"] +++ widget "number" "e" [intAttr "min" 1, intAttr "max" 99, intAttr "value" e]),
-            p << submit "" "Generate a new term graph"
-          ]
+            p << submit "" "Generate a new term"
+          ],
+        hr,
+        h1 << "Term:",  (textarea << show      (term phi)) HTML.! [intAttr "rows"  4, intAttr "cols" 80, strAttr "name" "t", strAttr "form" "term-form"],
+        p << (form << [submit "" "Generate an isomorphic graph", hidden "v" (show v), hidden "e" (show e)]) HTML.! [strAttr "id" "term-form"],
+        hr,
+        h1 << "Graph:", (textarea << show            phi)  HTML.! [intAttr "rows" 40, intAttr "cols" 40],
+                        (textarea << show' (termDag' phi)) HTML.! [intAttr "rows" 40, intAttr "cols" 40]
       ]
