@@ -4,12 +4,15 @@
 {-# LANGUAGE TemplateHaskell      #-}
 
 module TermGraph (
+  TermDag (..),
+  getGraph,
   IsoTermDag(..),
+  fromTermPermute,
   arbitraryIso,
   generateIsoOfSize,
-  runTests,
   show',
-  termDag'
+  termDag',
+  runTests
 ) where
   import Prelude                hiding (lookup)
 
@@ -115,6 +118,8 @@ module TermGraph (
       (g,v) = unTermDag $ toTermDag t
       root (Node r _) = r
 
+  getGraph = fst . unTermDag
+
   sizeTermDag :: TermDag -> (Int,Int)
   sizeTermDag tdag = (length $ vertices g, length $ edges g) where
     (g,_) = unTermDag tdag
@@ -155,13 +160,15 @@ module TermGraph (
 
   sizeIsoTermDag = sizeTermDag . termDag
 
+  fromTermPermute :: Term -> Permute -> IsoTermDag
+  fromTermPermute t p = IsoTermDag { term = t, termDag = toTermDag t, iso = p }
+
   arbitraryIso :: Term -> Gen IsoTermDag
   arbitraryIso t = do
-    let tdag = toTermDag t
-    let (_,m) = bounds $ fst $ unTermDag tdag
+    let (_,m) = bounds $ getGraph $ toTermDag t
     l <- shuffle [nvars .. m]
-    let p = listPermute (m + 1) ([0 .. nvars - 1] ++ l)
-    return $ IsoTermDag { term = t, termDag = tdag, iso = p }
+    let p = listPermute (m + 1) $ [0 .. nvars - 1] ++ l
+    return $ fromTermPermute t p
 
   generateIsoOfSize :: (Int,Int) -> IO IsoTermDag
   generateIsoOfSize (minV,minE) = generate $ suchThat arbitrary $ \phi -> let
@@ -187,12 +194,12 @@ module TermGraph (
     }
 
   lookupTermM :: Term -> State TGState (Maybe Vertex)
-  lookupTermM t = state $ \s -> (lookup t (dict s), s)
+  lookupTermM t = state $ \s -> (lookup t $ dict s, s)
 
   insertTermM :: Term -> [Vertex] -> State TGState Vertex
   insertTermM t vs = state $ \s -> let
     v = size $ dict s
-    dict' = insert t v (dict s)
+    dict' = insert t v $ dict s
     grph' = vs:(grph s)
     in (v, TGState { dict = dict', grph = grph' })
 
@@ -216,7 +223,7 @@ module TermGraph (
   --
   toTermM :: Graph -> Vertex -> Maybe Term
   toTermM g v = let
-    ms = map (toTermM g) (g ! v)
+    ms = map (toTermM g) $ g ! v
     in if any isNothing ms then Nothing else let
       ts = map fromJust ms
       in case (length ts) of
