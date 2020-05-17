@@ -1,32 +1,29 @@
-{-# LANGUAGE DataKinds            #-}
-{-# LANGUAGE DeriveGeneric        #-}
-{-# LANGUAGE FlexibleInstances    #-}
-{-# LANGUAGE TemplateHaskell      #-}
+{-# LANGUAGE DataKinds                  #-}
+{-# LANGUAGE DeriveGeneric              #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE TemplateHaskell            #-}
 
 module TermGraph (
-  TermDag (..),
-  getGraph,
-  IsoTermDag(..),
-  fromTermPermute,
+  IsoTDag(..),
+  TDag(..),
+  TermF,
+  TVars,
   arbitraryIso,
+  fromTermPermute,
   generateIsoOfSize,
+  runTests,
   show',
-  termDag',
-  runTests
+  tDag'
 ) where
   import Prelude                hiding (lookup)
 
-  import GHC.TypeNats                  (natVal)
   import Data.Mod.Word                 (Mod,unMod)
-  import Data.Tuple                    (fst,swap)
-
-  -- Copied from http://hackage.haskell.org/package/quickcheck-arbitrary-adt-0.3.1.0/docs/Test-QuickCheck-Arbitrary-ADT.html
-  import Data.Proxy                    (Proxy(..))
+  import GHC.TypeNats                  (KnownNat)
   import GHC.Generics                  (Generic)
-  import Test.QuickCheck               (Arbitrary(..),Gen,forAllProperties,generate,label,maxSuccess,quickCheckWithResult,shuffle,stdArgs,suchThat)
-  import Test.QuickCheck.Arbitrary.ADT (ToADTArbitrary,genericArbitrary)
-
   import Control.Monad                 (liftM)
+  import Test.QuickCheck               (Arbitrary(..),Gen,Property,forAllProperties,generate,label,maxSuccess,quickCheckWithResult,shuffle,stdArgs,suchThat)
+  import Test.QuickCheck.Arbitrary.ADT (genericArbitrary)
+  import Data.Tuple                    (fst,swap)
 
   import Data.Graph                    (Graph,Tree(..),Vertex,dff,edges,vertices)
   import Data.Array                    (array,bounds,elems,indices,listArray,(!))
@@ -37,50 +34,62 @@ module TermGraph (
   import Data.Maybe                    (fromJust,isNothing)
 
   --
-  type NVars = 3
-  nvars :: Int
-  nvars = fromInteger $ toInteger $ natVal (Proxy :: Proxy NVars)
+  newtype TVars m = TVars { unTVars :: Mod m } deriving (Bounded,Enum,Eq,Generic,Num,Ord)
 
-  fromInt :: Int -> Mod NVars
-  fromInt = fromInteger . toInteger
+  instance KnownNat m => Arbitrary (TVars m) where
+    arbitrary = liftM (TVars . fromIntegral . unMod) genericArbitrary
 
-  toInt :: Mod NVars -> Int
-  toInt = fromInteger . toInteger . unMod
+  instance KnownNat m => Show (TVars m) where
+    show = show . unMod . unTVars
 
-  instance Read (Mod NVars) where
-    readsPrec _ = map (swap . fmap fromInt . swap) . reads
-
-  instance Arbitrary (Mod NVars) where
-    arbitrary = liftM (fromInteger . toInteger . unMod) genericArbitrary
+  instance KnownNat m => Read (TVars m) where
+    readsPrec _ = map (swap . fmap (TVars . fromIntegral) . swap) . reads
 
   --
-  data Term
-    = Var (Mod NVars)
+  data TermF a
+    = Var a
     | Fun0
-    | Fun1 Term
-    | Fun2 Term Term
-    | Fun3 Term Term Term
+    | Fun1 (TermF a)
+    | Fun2 (TermF a) (TermF a)
+    | Fun3 (TermF a) (TermF a) (TermF a)
     deriving (Eq,Generic,Ord)
 
+  prop_Read_Show_Term :: TermF (TVars 3) -> Property
   prop_Read_Show_Term t = label l p where
     l = "size = " ++ show (sizeTerm t)
     p = t == (read . show) t
 
-  sizeTerm :: Term -> Int
+  vars :: (Bounded a, Enum a) => TermF a -> [a]
+  vars _ = enumFromTo minBound maxBound
+
+  nvars :: (Bounded a, Enum a) => TermF a -> Int
+  nvars = length . vars
+
+  sizeTerm :: TermF a -> Int
   sizeTerm (Var _)      = 1
   sizeTerm  Fun0        = 1
   sizeTerm (Fun1 t)     = 1 + sizeTerm t
   sizeTerm (Fun2 t s)   = 1 + sizeTerm t + sizeTerm s
   sizeTerm (Fun3 t s r) = 1 + sizeTerm t + sizeTerm s + sizeTerm r
 
-  instance Show Term where
-    show (Var i)      = "x" ++ show (unMod i)
+  instance Functor TermF where
+    fmap f (Var i)      = Var (f i)
+    fmap _  Fun0        = Fun0
+    fmap f (Fun1 t)     = Fun1 (fmap f t)
+    fmap f (Fun2 t s)   = Fun2 (fmap f t) (fmap f s)
+    fmap f (Fun3 t s r) = Fun3 (fmap f t) (fmap f s) (fmap f r)
+
+  instance Arbitrary a => Arbitrary (TermF a) where
+    arbitrary = genericArbitrary
+
+  instance Show a => Show (TermF a) where
+    show (Var i)      = "x" ++ show i
     show  Fun0        = "c"
     show (Fun1 t)     = "f(" ++ show t ++ ")"
     show (Fun2 t s)   = "g(" ++ show t ++ "," ++ show s ++ ")"
     show (Fun3 t s r) = "h(" ++ show t ++ "," ++ show s ++ "," ++ show r ++ ")"
 
-  instance Read Term where
+  instance Read a => Read (TermF a) where
     readsPrec p str0    =
       [ (Var i, str2) | ('x':str1, str2) <-         lex str0,
                                (i,   "") <-       reads str1 ] ++
@@ -104,99 +113,92 @@ module TermGraph (
                                (r, str7) <- readsPrec p str6,
                              (")", str8) <-         lex str7 ]
 
-  instance Arbitrary Term where
-    arbitrary = genericArbitrary
-
-  instance ToADTArbitrary Term
-
   --
-  newtype TermDag = TermDag { unTermDag :: (Graph,Vertex) }
+  data TDag a = TDag { dag :: Graph, root :: Vertex }
 
-  prop_TermDag_dff t = label l p where
+  prop_TDag_dff :: TermF (TVars 3) -> Property
+  prop_TDag_dff t = label l p where
     l = "size = " ++ show (sizeTerm t)
-    p = elem v (map root $ dff g) where
-      (g,v) = unTermDag $ toTermDag t
-      root (Node r _) = r
+    tdag = toTDag t
+    root' (Node r _) = r
+    p = elem (root tdag) (map root' $ dff $ dag tdag)
 
-  getGraph = fst . unTermDag
-
-  sizeTermDag :: TermDag -> (Int,Int)
-  sizeTermDag tdag = (length $ vertices g, length $ edges g) where
-    (g,_) = unTermDag tdag
+  sizeTDag :: TDag a -> (Int,Int)
+  sizeTDag tdag = (length $ vertices g, length $ edges g) where
+    g = dag tdag
   
-  show' :: TermDag -> String
+  show' :: TDag a -> String
   show' tdag = foldr1 (++) [
       show min, "\n",
       show max, "\n",
       foldr (++) "" [ show (length vs) ++ f vs ++ "\n" | vs <- elems g ]
-    ] where (g,_) = unTermDag tdag
+    ] where g = dag tdag
             (min,max) = bounds g
             f = foldr (++) "" . map ((++) " " . show)
 
-  instance Show TermDag where
-    show tdag = v' ++ es where
-      (g,v) = unTermDag tdag
-      v' = "; " ++ show v ++ "\n"
-      es = foldr (++) "" [ show i ++ " -> " ++ show j ++ "\n" | (i,j) <- edges g ]
+  instance Show (TDag a) where
+    show tdag = v ++ es where
+      v = "; " ++ show (root tdag) ++ "\n"
+      es = foldr (++) "" [ show i ++ " -> " ++ show j ++ "\n" | (i,j) <- edges $ dag tdag ]
 
   --
-  -- phi :: IsoTermDag and f = iso phi: representing a pair of
-  -- isomorphic term dags s.t. f (termDag phi) = termDag' phi
+  -- phi :: IsoTDag and f = iso phi: representing a pair of
+  -- isomorphic term dags s.t. f (tDag phi) = tDag' phi
   --
-  data IsoTermDag = IsoTermDag { term :: Term, termDag :: TermDag, iso :: Permute }
+  data IsoTDag a = IsoTDag { term :: TermF a, tDag :: TDag a, iso :: Permute }
 
-  termDag' :: IsoTermDag -> TermDag
-  termDag' phi = TermDag (g',v') where
-    (g,v) = unTermDag $ termDag phi
+  prop_IsoTDag :: IsoTDag (TVars 3) -> Property
+  prop_IsoTDag phi = label l p where
+    l = "size = " ++ show (sizeIsoTDag phi)
+    p = (toTerm $ tDag phi) == (toTerm $ tDag' phi)
+
+  tDag' :: IsoTDag a -> TDag a
+  tDag' phi = TDag { dag = g', root = f $ root $ tDag phi } where
+    g = dag $ tDag phi
     f = at $ iso phi
     idx = map f (indices g)
     elm = map (map f) (elems g)
     g' = array (bounds g) (zip idx elm)
-    v' = f v
 
-  prop_IsoTermDag phi = label l p where
-    l = "size = " ++ show (sizeIsoTermDag phi)
-    p = (toTerm $ termDag phi) == (toTerm $ termDag' phi)
+  sizeIsoTDag = sizeTDag . tDag
 
-  sizeIsoTermDag = sizeTermDag . termDag
+  fromTermPermute :: (Bounded a, Enum a, Ord a) => TermF a -> Permute -> IsoTDag a
+  fromTermPermute t p = IsoTDag { term = t, tDag = toTDag t, iso = p }
 
-  fromTermPermute :: Term -> Permute -> IsoTermDag
-  fromTermPermute t p = IsoTermDag { term = t, termDag = toTermDag t, iso = p }
-
-  arbitraryIso :: Term -> Gen IsoTermDag
+  arbitraryIso :: (Bounded a, Enum a, Ord a) => TermF a -> Gen (IsoTDag a)
   arbitraryIso t = do
-    let (_,m) = bounds $ getGraph $ toTermDag t
-    l <- shuffle [nvars .. m]
-    let p = listPermute (m + 1) $ [0 .. nvars - 1] ++ l
+    let (_,m) = bounds $ dag $ toTDag t
+    l <- shuffle [nvars t .. m]
+    let p = listPermute (m + 1) $ map fromEnum (vars t) ++ l
     return $ fromTermPermute t p
 
-  generateIsoOfSize :: (Int,Int) -> IO IsoTermDag
+  generateIsoOfSize :: (Arbitrary a, Bounded a, Enum a, Ord a) => (Int,Int) -> IO (IsoTDag a)
   generateIsoOfSize (minV,minE) = generate $ suchThat arbitrary $ \phi -> let
-    (v,e) = sizeIsoTermDag phi
+    (v,e) = sizeIsoTDag phi
     in v >= minV && e >= minE
 
-  instance Show IsoTermDag where
-    show phi = "; " ++ (show $ term phi) ++ "\n" ++ (show $ termDag' phi)
+  instance Show a => Show (IsoTDag a) where
+    show phi = "; " ++ (show $ term phi) ++ "\n" ++ (show $ tDag' phi)
 
-  instance Arbitrary IsoTermDag where
+  instance (Arbitrary a, Bounded a, Enum a, Ord a) => Arbitrary (IsoTDag a) where
     arbitrary = arbitrary >>= arbitraryIso
 
   --
-  data TGState = TGState {
-      dict :: Map Term Vertex,
+  data TGState a = TGState {
+      dict :: Map (TermF a) Vertex,
       grph :: [[Vertex]]
     }
 
-  initTGState :: TGState
-  initTGState = TGState {
-      dict = fromList [ (Var $ fromInt i, i) | i <- [0 .. nvars - 1] ],
-      grph = replicate nvars []
+  initTGState :: (Bounded a, Enum a, Ord a) => TermF a -> TGState a
+  initTGState t = TGState {
+      dict = fromList $ zip (map Var $ vars t) (map fromEnum $ vars t),
+      grph = replicate (nvars t) []
     }
 
-  lookupTermM :: Term -> State TGState (Maybe Vertex)
+  lookupTermM :: Ord a => TermF a -> State (TGState a) (Maybe Vertex)
   lookupTermM t = state $ \s -> (lookup t $ dict s, s)
 
-  insertTermM :: Term -> [Vertex] -> State TGState Vertex
+  insertTermM :: Ord a => TermF a -> [Vertex] -> State (TGState a) Vertex
   insertTermM t vs = state $ \s -> let
     v = size $ dict s
     dict' = insert t v $ dict s
@@ -204,7 +206,7 @@ module TermGraph (
     in (v, TGState { dict = dict', grph = grph' })
 
   --
-  toArrayM :: Term -> State TGState Vertex
+  toArrayM :: Ord a => TermF a -> State (TGState a) Vertex
   toArrayM t = do
     m <- lookupTermM t
     case m of
@@ -215,30 +217,31 @@ module TermGraph (
         Fun1 s     -> do { v <- toArrayM s ;                                     insertTermM t [v] }
         _          ->                                                            insertTermM t []
 
-  toTermDag :: Term -> TermDag
-  toTermDag t = TermDag (g,v) where
-    (v,s) = runState (toArrayM t) initTGState
+  toTDag :: (Bounded a, Enum a, Ord a) => TermF a -> TDag a
+  toTDag t = TDag { dag = g, root = v } where
+    (v,s) = runState (toArrayM t) (initTGState t)
     g = listArray (0, length (grph s) - 1) (reverse $ grph s)
 
   --
-  toTermM :: Graph -> Vertex -> Maybe Term
+  toTermM :: (Bounded a, Enum a) => Graph -> Vertex -> Maybe (TermF a)
   toTermM g v = let
     ms = map (toTermM g) $ g ! v
     in if any isNothing ms then Nothing else let
       ts = map fromJust ms
       in case (length ts) of
-        0 ->                     Just $ if v < nvars then Var $ fromInt v else Fun0
+        0 -> Just $ let t = if v < nvars t then Var $ toEnum v else Fun0 in t
         1 -> let [t]     = ts in Just $ Fun1 t
         2 -> let [t,s]   = ts in Just $ Fun2 t s
         3 -> let [t,s,r] = ts in Just $ Fun3 t s r
         _ -> Nothing
 
-  toTerm :: TermDag -> Maybe Term
-  toTerm = uncurry toTermM . unTermDag 
+  toTerm :: (Bounded a, Enum a) => TDag a -> Maybe (TermF a)
+  toTerm tdag = toTermM (dag tdag) (root tdag)
 
-  prop_toTerm_isaRetractOf_toTermDag t = label l p where
+  prop_toTerm_isaRetractOf_toTDag :: TermF (TVars 3) -> Property
+  prop_toTerm_isaRetractOf_toTDag t = label l p where
     l = "size = " ++ show (sizeTerm t)
-    p = Just t == (toTerm . toTermDag) t
+    p = Just t == (toTerm . toTDag) t
 
   --
   return []

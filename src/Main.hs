@@ -1,3 +1,5 @@
+{-# LANGUAGE DataKinds #-}
+
 module Main where
   import TermGraph
 
@@ -30,7 +32,7 @@ module Main where
   cgiMain = do
     v <- liftM (fromMaybe  8 . (>>=readMaybe)) $ getInput "v"
     e <- liftM (fromMaybe 16 . (>>=readMaybe)) $ getInput "e"
-    t <- liftM (>>=readMaybe) $ getInput "t"
+    t <- liftM (>>=readMaybe) $ getInput "t" :: (CGI (Maybe (TermF (TVars 3))))
     i <- liftM (>>=readMaybe) $ getInput "i"
     o <- liftM (>>=readMaybe) $ getInput "o"
     phi <- liftIO $ case (t,i) of
@@ -59,11 +61,11 @@ module Main where
         h1 << "Graph:",
         (textarea << show phi)
           ! [intAttr "rows" 20, intAttr "cols" 40, emptyAttr "readonly"],
-        (textarea << show' (termDag' phi))
+        (textarea << show' (tDag' phi))
           ! [intAttr "rows" 20, intAttr "cols" 40, emptyAttr "readonly"],
         hr,
         h1 << "Vertex list:",
-        (textarea << if isNothing o then (show $ topSort $ getGraph $ termDag' phi) else (show $ elems $ fromJust o))
+        (textarea << if isNothing o then (show $ topSort $ dag $ tDag' phi) else (show $ elems $ fromJust o))
           ! [intAttr "rows"  4, intAttr "cols" 80, strAttr "name" "o", strAttr "form" "topsort-form"],
         p << (form << [submit "" "Is this a topological sort?",
                        hidden "v" (show v),
@@ -71,10 +73,10 @@ module Main where
                        hidden "t" (show $ term phi),
                        hidden "i" (show $ elems $ iso phi)]) ! [strAttr "id" "topsort-form"],
         p << if isNothing o then ""
-        else if (size $ fromJust o) /= (length $ vertices $ getGraph $ termDag' phi) then "No, because of length mismatch"
+        else if (size $ fromJust o) /= (length $ vertices $ dag $ tDag' phi) then "No, because of length mismatch"
         else let
           f = indexOf $ fromJust o
-          es = filter (\(u,v) -> f u > f v) $ edges $ getGraph $ termDag' phi
+          es = filter (\(u,v) -> f u > f v) $ edges $ dag $ tDag' phi
           in if null es then "Yes" else "No, because of edge(s) " ++ show es
       ]
 
